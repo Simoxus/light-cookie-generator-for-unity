@@ -1,312 +1,204 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
+using Object = UnityEngine.Object;
+
 public class CookieGeneratorWindow
 {
-    private Vector2 scrollPosition;
-    private SerializedObject serializedSettings;
-    private List<Light> lights = new List<Light>();
-    private bool showPreviews = false;
-
-    public void Initialize(SerializedObject serializedSettings)
-    {
-        this.serializedSettings = serializedSettings;
-    }
+    private Texture2D _headerIcon;
+    private Vector2 _scrollPosition;
+    private List<Light> _lights = new List<Light>();
+    private Dictionary<Light, Editor> _lightDataEditors = new Dictionary<Light, Editor>();
+    private Dictionary<Light, bool> _lightDataFoldouts = new Dictionary<Light, bool>();
+    private bool _showPreviews = false;
 
     public void BeginDraw()
     {
-        if (serializedSettings != null)
-        {
-            serializedSettings.Update();
-        }
-
-        scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+        _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
     }
 
     public void EndDraw()
     {
         EditorGUILayout.EndScrollView();
-
-        if (serializedSettings != null)
-        {
-            serializedSettings.ApplyModifiedProperties();
-        }
     }
 
     public void DrawHeader()
     {
-        GUILayout.Label("Light Cookie Generator", EditorStyles.whiteLargeLabel);
+        if (_headerIcon == null)
+        {
+            string[] guids = AssetDatabase.FindAssets("CookieGenerator-cover t:Texture2D");
+            if (guids.Length > 0)
+            {
+                _headerIcon = AssetDatabase.LoadAssetAtPath<Texture2D>(AssetDatabase.GUIDToAssetPath(guids[0]));
+            }
+        }
+
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.FlexibleSpace();
+
+        if (_headerIcon != null)
+        {
+            GUILayout.Label(_headerIcon, GUILayout.Width(216), GUILayout.Height(144));
+        }
+        else
+        {
+            GUILayout.Label("Light Cookie Generator", EditorStyles.whiteLargeLabel);
+        }
+
+        GUILayout.FlexibleSpace();
+        EditorGUILayout.EndHorizontal();
     }
 
-    public void DrawVisibilityError()
+    public bool DrawPipelineError()
     {
-        bool supportsLightCookies = CookieSupportChecker.SupportsLightCookies();
-        if (!supportsLightCookies)
+        if (!CookieGenerator.RenderPipelineInfo.IsSupportedPipeline())
         {
-            EditorGUILayout.HelpBox(
-                "Enable \"Light Cookies\" in the RP asset in order to see light cookies.",
-                MessageType.Error
-            );
+            EditorGUILayout.HelpBox("Cookie baking only supports URP and HDRP. :(", MessageType.Error);
+            return true;
         }
+        return false;
     }
 
     public void DrawValidationWarning()
     {
-        if (lights.Count == 0)
+        if (_lights.Count == 0)
         {
-            EditorGUILayout.HelpBox(
-                "Add at least one Light in order to generate light cookies.",
-                MessageType.Warning
-            );
+            EditorGUILayout.HelpBox("Add at least one Light to generate cookies.", MessageType.Warning);
         }
-
-        EditorGUILayout.Space();
-    }
-
-    public void DrawLoadSettings(CookieGeneratorSettings settings)
-    {
-        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-        GUILayout.Label("Load Settings from Cookie", EditorStyles.boldLabel);
-
-        Texture2D cookieToLoad = (Texture2D)EditorGUILayout.ObjectField(
-            "Cookie Texture",
-            null,
-            typeof(Texture2D),
-            false
-        );
-
-        if (cookieToLoad != null)
+        foreach (Light light in _lights)
         {
-            CookieTextureMetadata metadata = CookieTextureMetadata.LoadFromTexture(cookieToLoad);
-
-            if (metadata == null)
+            if (light != null && light.GetComponent<LightCookieData>() == null)
             {
-                EditorUtility.DisplayDialog("No Metadata Found",
-                    "This texture doesn't contain generation settings.",
-                    "OK"
-                );
-                return;
-            }
-
-            if (EditorUtility.DisplayDialog("Load Settings",
-                "Load these settings?\n\n" + metadata.GetSummary(),
-                "Load", "Cancel"))
-            {
-                metadata.ApplyToSettings(settings);
+                EditorGUILayout.HelpBox($"{light.gameObject.name} has no LightCookieData component.", MessageType.Warning);
             }
         }
-
-        EditorGUILayout.EndVertical();
-        EditorGUILayout.Space();
     }
 
     public void DrawLightsList()
     {
+        EditorGUILayout.Space();
+
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-        GUILayout.Label($"Lights ({lights.Count})", EditorStyles.boldLabel);
+        GUILayout.Label($"Lights ({_lights.Count})", EditorStyles.boldLabel);
 
-        // Remove null entries
-        for (int i = lights.Count - 1; i >= 0; i--)
+        for (int i = _lights.Count - 1; i >= 0; i--)
         {
-            if (lights[i] == null)
+            if (_lights[i] == null)
             {
-                lights.RemoveAt(i);
+                _lights.RemoveAt(i);
+                continue;
             }
-        }
 
-        // Draw existing lights
-        for (int i = lights.Count - 1; i >= 0; i--)
-        {
+            Light light = _lights[i];
+
             EditorGUILayout.BeginHorizontal();
-
             EditorGUI.BeginDisabledGroup(true);
-            EditorGUILayout.ObjectField(lights[i], typeof(Light), true);
+            EditorGUILayout.ObjectField(light, typeof(Light), true);
             EditorGUI.EndDisabledGroup();
-
-            GUILayout.Label($"{lights[i].type}", GUILayout.Width(80));
-
-            if (GUILayout.Button("×", GUILayout.Width(25)))
+            GUILayout.Label($"{light.type}", GUILayout.Width(100));
+            if (GUILayout.Button("X", GUILayout.Width(25)))
             {
-                lights.RemoveAt(i);
+                _lights.RemoveAt(i);
             }
-
             EditorGUILayout.EndHorizontal();
         }
 
-        // Add new light field
         Light newLight = EditorGUILayout.ObjectField("Add Light", null, typeof(Light), true) as Light;
-        if (newLight != null && !lights.Contains(newLight))
+        if (newLight != null && !_lights.Contains(newLight))
         {
-            if (newLight.type == LightType.Spot || newLight.type == LightType.Directional)
+            if (CookieGenerator.IsValidLightType(newLight))
             {
-                lights.Add(newLight);
-            }
-            else
-            {
-                EditorUtility.DisplayDialog("Invalid Light Type",
-                    "Only Spot and Directional lights are supported.",
-                    "OK"
-                );
+                _lights.Add(newLight);
             }
         }
 
         EditorGUILayout.Space();
 
-        // Batch operations
-        if (GUILayout.Button("Add Selected Lights"))
+        if (GUILayout.Button("Add Selected Lights")) AddSelectedLights();
+        if (GUILayout.Button("Clear All Lights")) _lights.Clear();
+
+        EditorGUILayout.Space();
+
+        if (GUILayout.Button("Add All Lights With Cookie Data")) AddLightsWithCookieData(enabledOnly: false);
+        if (GUILayout.Button("Add Enabled Lights With Cookie Data")) AddLightsWithCookieData(enabledOnly: true);
+
+        EditorGUILayout.EndVertical();
+        EditorGUILayout.Space();
+    }
+
+    public void DrawLightDataEditors()
+    {
+        CleanupStaleEditors();
+
+        var usedNames = new HashSet<string>();
+        var resolvedNames = new Dictionary<Light, string>();
+        foreach (Light light in _lights)
         {
-            AddSelectedLights();
+            LightCookieData data = light.GetComponent<LightCookieData>();
+            if (data == null) continue;
+            string baseName = $"Cookie_{data.ResolveBaseName()}_{light.type}";
+            string uniqueName = CookieGenerator.ResolveSafeName(baseName, data.savePath, null, usedNames);
+            usedNames.Add(uniqueName);
+            resolvedNames[light] = uniqueName;
         }
 
-        if (GUILayout.Button("Clear All Lights"))
+        foreach (Light light in _lights)
         {
-            lights.Clear();
-        }
+            LightCookieData data = light.GetComponent<LightCookieData>();
+            if (data == null) continue;
 
-        EditorGUILayout.EndVertical();
-        EditorGUILayout.Space();
-    }
-
-    public void DrawRenderingSettings(CookieGeneratorSettings settings)
-    {
-        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-        GUILayout.Label("Render Settings", EditorStyles.boldLabel);
-
-        settings.useSpotlightRange = EditorGUILayout.Toggle("Use Spotlight Range", settings.useSpotlightRange);
-        if (!settings.useSpotlightRange)
-        {
-            settings.shadowPlaneDistance = EditorGUILayout.FloatField("Shadow Plane Distance", settings.shadowPlaneDistance);
-        }
-
-        settings.shadowOpacity = EditorGUILayout.Slider("Shadow Opacity", settings.shadowOpacity, 0f, 1f);
-        EditorGUILayout.HelpBox(
-            "Controls how dark/visible shadows are.\n0 = No visible shadows, 1 = Literally only shadows",
-            MessageType.None
-        );
-
-        settings.cookieBrightness = EditorGUILayout.Slider("Overall Brightness", settings.cookieBrightness, 0f, 1f);
-        EditorGUILayout.HelpBox(
-            "Lifts the entire image brightness.\n0 = Normal, 1 = Maximum (white)",
-            MessageType.None
-        );
-
-        EditorGUILayout.EndVertical();
-        EditorGUILayout.Space();
-    }
-
-    public void DrawShadowSettings(CookieGeneratorSettings settings)
-    {
-        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-        GUILayout.Label("Shadow Quality", EditorStyles.boldLabel);
-
-        settings.shadowSampleRadius = EditorGUILayout.FloatField("Shadow Sample Radius", settings.shadowSampleRadius);
-        settings.shadowSamples = EditorGUILayout.IntSlider("Shadow Samples", settings.shadowSamples, 1, 24);
-
-        EditorGUILayout.EndVertical();
-        EditorGUILayout.Space();
-    }
-
-    public void DrawBlurSettings(CookieGeneratorSettings settings)
-    {
-        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-        GUILayout.Label("Blur Settings", EditorStyles.boldLabel);
-
-        settings.blurMethod = (CookieTextureSmoother.SmoothingMethod)EditorGUILayout.EnumPopup("Blur Method", settings.blurMethod);
-        settings.blurRadius = EditorGUILayout.IntSlider("Blur Radius", settings.blurRadius, 1, 10);
-        settings.blurIterations = EditorGUILayout.IntSlider("Blur Iterations", settings.blurIterations, 1, 5);
-
-        EditorGUILayout.EndVertical();
-        EditorGUILayout.Space();
-    }
-
-    public void DrawCameraSettings(CookieGeneratorSettings settings)
-    {
-        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-        GUILayout.Label("Camera Settings", EditorStyles.boldLabel);
-
-        SerializedProperty rotationOffsetProp = serializedSettings.FindProperty("rotationOffset");
-
-        EditorGUILayout.PropertyField(rotationOffsetProp, new GUIContent("Rotation Offset"));
-
-        if (GUILayout.Button("Reset Rotation"))
-        {
-            CookieGeneratorSettings s = serializedSettings.targetObject as CookieGeneratorSettings;
-            if (s != null)
+            if (!_lightDataEditors.TryGetValue(light, out Editor editor) || editor == null)
             {
-                s.rotationOffset = Vector3.zero;
-                SceneView.RepaintAll();
+                _lightDataEditors[light] = editor = Editor.CreateEditor(data);
             }
-        }
 
-        EditorGUILayout.EndVertical();
-        EditorGUILayout.Space();
-    }
-
-    public void DrawUISettings(CookieGeneratorSettings settings)
-    {
-        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-        GUILayout.Label("UI Settings", EditorStyles.boldLabel);
-
-        SerializedProperty showGizmosProp = serializedSettings.FindProperty("showGizmos");
-        EditorGUILayout.PropertyField(showGizmosProp, new GUIContent("Show Gizmos"));
-
-        EditorGUILayout.EndVertical();
-        EditorGUILayout.Space();
-    }
-
-    public void DrawOutputSettings(CookieGeneratorSettings settings, CookieTextureSaver saver)
-    {
-        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-        GUILayout.Label("Output Settings", EditorStyles.boldLabel);
-
-        EditorGUILayout.BeginHorizontal();
-        settings.savePath = EditorGUILayout.TextField("Save Folder", settings.savePath);
-        if (GUILayout.Button("Browse", GUILayout.Width(86)))
-        {
-            string selectedPath = saver.SelectSavePath();
-            if (!string.IsNullOrEmpty(selectedPath))
+            if (!_lightDataFoldouts.ContainsKey(light))
             {
-                settings.savePath = selectedPath;
+                _lightDataFoldouts[light] = false;
             }
-        }
-        EditorGUILayout.EndHorizontal();
 
-        EditorGUILayout.BeginHorizontal();
-        settings.baseName = EditorGUILayout.TextField("Base Name", settings.baseName);
-        if (GUILayout.Button("Selected", GUILayout.Width(86)))
-        {
-            if (Selection.activeGameObject != null)
+            string displayName = resolvedNames.TryGetValue(light, out string n) ? n : data.ResolveBaseName();
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            try
             {
-                settings.baseName = Selection.activeGameObject.name;
+                _lightDataFoldouts[light] = EditorGUILayout.Foldout(_lightDataFoldouts[light], displayName, true, EditorStyles.foldout);
+                if (_lightDataFoldouts[light])
+                {
+                    editor.OnInspectorGUI();
+                }
             }
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+            }
+            finally
+            {
+                EditorGUILayout.EndVertical();
+            }
+            EditorGUILayout.Space();
         }
-        EditorGUILayout.EndHorizontal();
-
-        settings.resolution = EditorGUILayout.IntPopup("Resolution", settings.resolution,
-            new string[] { "256", "512", "1024", "2048" },
-            new int[] { 256, 512, 1024, 2048 });
-
-        EditorGUILayout.EndVertical();
-        EditorGUILayout.Space();
     }
 
     public void DrawPreview(Dictionary<Light, Texture2D> previews)
     {
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-        showPreviews = EditorGUILayout.Foldout(showPreviews, $"Preview ({previews.Count})", true);
+        _showPreviews = EditorGUILayout.Foldout(_showPreviews, $"Preview ({previews.Count})", true);
 
-        if (showPreviews && previews.Count > 0)
+        if (_showPreviews && previews.Count > 0)
         {
             EditorGUILayout.Space();
-
             foreach (var kvp in previews)
             {
                 if (kvp.Key == null || kvp.Value == null) continue;
 
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
                 GUILayout.Label(kvp.Key.name, EditorStyles.boldLabel);
                 GUILayout.Box(kvp.Value, GUILayout.Width(128), GUILayout.Height(128));
+
                 EditorGUILayout.EndVertical();
             }
         }
@@ -315,71 +207,50 @@ public class CookieGeneratorWindow
         EditorGUILayout.Space();
     }
 
-    public void DrawGenerateButtons(CookieGeneratorSettings settings, System.Action onGeneratePreviews, System.Action onGenerateAll)
+    public List<Light> GetLights() => _lights;
+
+    public void DrawGenerateButtons(CookieGeneratorSettings settings, Action onGeneratePreviews, Action onGenerateAll)
     {
         EditorGUILayout.BeginHorizontal();
 
-        GUI.enabled = lights.Count > 0;
+        bool allReady = _lights.Count > 0 && _lights.TrueForAll(
+            light => light != null && light.GetComponent<LightCookieData>()?.occluders.Count > 0);
 
-        if (GUILayout.Button($"Generate {lights.Count} Preview(s)", GUILayout.Height(40)))
+        GUI.enabled = allReady;
+
+        string lightWord = _lights.Count == 1 ? "Light" : "Lights";
+        string cookieWord = _lights.Count == 1 ? "Cookie" : "Cookies";
+
+        if (GUILayout.Button($"Preview {_lights.Count} {lightWord}", GUILayout.Height(40)))
         {
             onGeneratePreviews?.Invoke();
         }
-
-        if (GUILayout.Button($"Generate {lights.Count} Cookie(s)", GUILayout.Height(40)))
+        if (GUILayout.Button($"Generate {_lights.Count} {cookieWord}", GUILayout.Height(40)))
         {
             onGenerateAll?.Invoke();
         }
 
         GUI.enabled = true;
-
         EditorGUILayout.EndHorizontal();
         EditorGUILayout.Space();
     }
 
-    public void DrawResetButton(CookieGeneratorSettings settings)
+    public void GenerateAllCookies()
     {
-        if (GUILayout.Button("Reset Settings to Default"))
+        if (_lights.Count == 0) return;
+
+        var usedNames = new HashSet<string>();
+        CookieGenerator.RunWithProgress("Generating Cookies", "Preparing...", "Preheating oven...", _lights, (light, i) =>
         {
-            if (EditorUtility.DisplayDialog("Reset Settings",
-                "Reset all settings to default values?", "Yes", "Cancel"))
-            {
-                settings.Reset();
-            }
-        }
-    }
-
-    public List<Light> GetLights()
-    {
-        return lights;
-    }
-
-    public void GenerateAllCookies(CookieGeneratorSettings settings, CookieRenderer renderer, CookieTextureSaver saver)
-    {
-        if (lights.Count == 0) return;
-
-        EditorUtility.DisplayProgressBar("Generating Cookies", "Preparing...", 0f);
-
-        try
-        {
-            for (int i = 0; i < lights.Count; i++)
-            {
-                Light light = lights[i];
-                if (light == null) continue;
-
-                float progress = (float)i / lights.Count;
-                EditorUtility.DisplayProgressBar("Generating Cookies",
-                    $"Processing {light.name} ({i + 1}/{lights.Count})",
-                    progress
-                );
-
-                CookieTextureSaver.GenerateCookieForLight(light, settings, settings.savePath, settings.baseName, true);
-            }
-        }
-        finally
-        {
-            EditorUtility.ClearProgressBar();
-        }
+            LightCookieData data = light.GetComponent<LightCookieData>();
+            if (data == null) return;
+            string baseName = $"Cookie_{data.ResolveBaseName()}_{light.type}";
+            string safeName = CookieGenerator.ResolveSafeName(baseName, data.savePath, data.lastBakedName, usedNames);
+            usedNames.Add(safeName);
+            CookieTextureSaver.GenerateCookieForLight(light, data, data.savePath, safeName, true);
+            data.lastBakedName = safeName;
+            EditorUtility.SetDirty(data);
+        });
 
         AssetDatabase.Refresh();
     }
@@ -388,37 +259,55 @@ public class CookieGeneratorWindow
     {
         if (Selection.gameObjects.Length == 0)
         {
-            EditorUtility.DisplayDialog("No Selection",
-                "Please select one or more GameObjects with Light components.",
-                "OK"
-            );
+            EditorUtility.DisplayDialog("No Selection", "Select one or more GameObjects with Light components.", "OK");
             return;
         }
 
         int added = 0;
-        foreach (GameObject go in Selection.gameObjects)
+        foreach (GameObject gameObject in Selection.gameObjects)
         {
-            Light light = go.GetComponent<Light>();
-            if (light != null && !lights.Contains(light))
+            Light light = gameObject.GetComponent<Light>();
+            if (light == null || _lights.Contains(light)) continue;
+            if (CookieGenerator.IsValidLightType(light))
             {
-                if (light.type == LightType.Spot || light.type == LightType.Directional)
-                {
-                    lights.Add(light);
-                    added++;
-                }
+                _lights.Add(light);
+                added++;
             }
         }
 
-        if (added > 0)
+        if (added == 0)
         {
-            Debug.Log($"Added {added} light(s) to generator.");
+            EditorUtility.DisplayDialog("No Lights Found", "No valid lights found in selection.", "OK");
         }
-        else
+    }
+
+    private void AddLightsWithCookieData(bool enabledOnly)
+    {
+        foreach (var data in Object.FindObjectsByType<LightCookieData>(FindObjectsSortMode.None))
         {
-            EditorUtility.DisplayDialog("No Lights Found",
-                "No valid Spot or Directional lights found in selection.",
-                "OK"
-            );
+            if (enabledOnly && (!data.enabled)) continue;
+            Light light = data.GetComponent<Light>();
+            if (light == null || (enabledOnly && !light.enabled) || _lights.Contains(light)) continue;
+            if (CookieGenerator.IsValidLightType(light))
+            {
+                _lights.Add(light);
+            }
+        }
+    }
+
+    private void CleanupStaleEditors()
+    {
+        var removedKeys = new List<Light>();
+        foreach (var key in _lightDataEditors.Keys)
+            if (key == null || !_lights.Contains(key))
+                removedKeys.Add(key);
+
+        foreach (var key in removedKeys)
+        {
+            if (_lightDataEditors.TryGetValue(key, out var editor) && editor != null)
+                Object.DestroyImmediate(editor);
+            _lightDataEditors.Remove(key);
+            _lightDataFoldouts.Remove(key);
         }
     }
 }

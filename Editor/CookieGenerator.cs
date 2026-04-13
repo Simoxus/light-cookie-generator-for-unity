@@ -1,6 +1,9 @@
+using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 public class CookieGenerator : EditorWindow
 {
@@ -24,47 +27,84 @@ public class CookieGenerator : EditorWindow
             return typeName != null && typeName.Contains("HDRenderPipelineAsset"); // Might br considered a little hacky but it works
         }
     }
+
+    public static bool IsValidLightType(Light light)
+    {
+        return light.type == LightType.Spot || light.type == LightType.Directional || light.type == LightType.Point;
+    }
+
+    public static string ResolveSafeName(string baseName, string savePath, string ownedName, HashSet<string> usedThisBatch)
+    {
+        if (!string.IsNullOrEmpty(ownedName) && !usedThisBatch.Contains(ownedName))
+        {
+            // Only reuse the owned name if the fiel actually exists
+            if (AssetDatabase.LoadAssetAtPath<Texture2D>($"{savePath}/{ownedName}.png") != null)
+            {
+                return ownedName;
+            }
+        }
+
+        string candidate = baseName;
+        int counter = 1;
+        while (usedThisBatch.Contains(candidate) || AssetDatabase.LoadAssetAtPath<Texture2D>($"{savePath}/{candidate}.png") != null)
+        {
+            candidate = $"{baseName} ({counter++})";
+        }
+
+        return candidate;
+    }
+
+    public static void RunWithProgress<T>(string title, string info, string funnyInfo, List<T> items, Action<T, int> process)
+    {
+        static string Msg(string normal, string funny) => CookieGeneratorDefaults.SHOW_STUPID_STUFF ? funny : normal;
+
+        EditorUtility.DisplayProgressBar(title, Msg(info, funnyInfo), 0f);
+        try
+        {
+            for (int i = 0; i < items.Count; i++)
+            {
+                T item = items[i];
+                if (item == null) continue;
+                EditorUtility.DisplayProgressBar(title,
+                    Msg($"Processing {i + 1} of {items.Count}...", $"Baking {i + 1} of {items.Count}..."),
+                    (float)i / items.Count);
+                process(item, i);
+            }
+        }
+        finally
+        {
+            EditorUtility.ClearProgressBar();
+        }
+    }
+
     private CookieGeneratorSettings settings;
     private SerializedObject serializedSettings;
     private CookieGeneratorWindow mainWindow;
-    private CookieRenderer renderer;
-    private CookieTextureSaver saver;
-    private CookieGizmoDrawer gizmoDrawer;
     private Dictionary<Light, Texture2D> batchPreviewTextures = new Dictionary<Light, Texture2D>();
 
-    [MenuItem("Tools/Light Cookie Generator")]
-    public static void ShowWindow()
-    {
-        GetWindow<CookieGenerator>("Cookie Generator");
-    }
+    [MenuItem("Window/Rendering/Light Cookie Generator")]
+    public static void ShowWindow() => GetWindow<CookieGenerator>("Cookie Generator");
 
     private void OnEnable()
     {
         if (settings == null)
         {
             settings = CreateInstance<CookieGeneratorSettings>();
-            settings.LoadFromEditorPrefs();
         }
 
         serializedSettings = new SerializedObject(settings);
         mainWindow = new CookieGeneratorWindow();
-        mainWindow.Initialize(serializedSettings);
-        renderer = new CookieRenderer(settings);
-        saver = new CookieTextureSaver(settings);
-        gizmoDrawer = new CookieGizmoDrawer(settings);
 
-        SceneView.duringSceneGui += OnSceneGUI;
+        string[] guids = AssetDatabase.FindAssets("CookieGenerator-windowtitle-icon t:Texture2D");
+        if (guids.Length > 0)
+        {
+            var icon = AssetDatabase.LoadAssetAtPath<Texture2D>(AssetDatabase.GUIDToAssetPath(guids[0]));
+            titleContent = new GUIContent("Cookie Generator", icon);
+        }
     }
 
     private void OnDisable()
     {
-        SceneView.duringSceneGui -= OnSceneGUI;
-
-        if (settings != null)
-        {
-            settings.SaveToEditorPrefs();
-        }
-
         ClearBatchPreviews();
     }
 
@@ -77,31 +117,27 @@ public class CookieGenerator : EditorWindow
         }
 
         mainWindow.BeginDraw();
-
-        mainWindow.DrawHeader();
-        mainWindow.DrawVisibilityError();
-        mainWindow.DrawValidationWarning();
-
-        mainWindow.DrawLoadSettings(settings);
-
-        mainWindow.DrawLightsList();
-        mainWindow.DrawRenderingSettings(settings);
-        mainWindow.DrawShadowSettings(settings);
-        mainWindow.DrawBlurSettings(settings);
-        mainWindow.DrawCameraSettings(settings);
-        mainWindow.DrawOutputSettings(settings, saver);
-
-        mainWindow.DrawPreview(batchPreviewTextures);
-        mainWindow.DrawGenerateButtons(settings, GeneratePreviews, GenerateAllCookies);
-        mainWindow.DrawResetButton(settings);
-
-        mainWindow.EndDraw();
+        try
+        {
+            mainWindow.DrawHeader();
+            if (mainWindow.DrawPipelineError()) return;
+            mainWindow.DrawValidationWarning();
+            mainWindow.DrawLightsList();
+            mainWindow.DrawLightDataEditors();
+            mainWindow.DrawPreview(batchPreviewTextures);
+            mainWindow.DrawGenerateButtons(settings, GeneratePreviews, GenerateAllCookies);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogException(ex);
+        }
+        finally
+        {
+            mainWindow.EndDraw();
+        }
 
         if (GUI.changed)
         {
-            settings.SaveToEditorPrefs();
-            gizmoDrawer.SetLights(mainWindow.GetLights());
-
             SceneView.RepaintAll();
         }
     }
@@ -110,81 +146,36 @@ public class CookieGenerator : EditorWindow
     {
         foreach (var texture in batchPreviewTextures.Values)
         {
-            if (texture != null)
-            {
-                DestroyImmediate(texture);
-            }
+            if (texture != null) DestroyImmediate(texture);
         }
-
         batchPreviewTextures.Clear();
     }
 
     private void GeneratePreviews()
     {
         ClearBatchPreviews();
-
         List<Light> lights = mainWindow.GetLights();
         if (lights.Count == 0) return;
 
-        EditorUtility.DisplayProgressBar("Generating Previews", "Preparing...", 0f);
-
-        try
+        RunWithProgress("Generating Previews", "Preparing previews...", "Turning on the oven light...", lights, (light, i) =>
         {
-            for (int i = 0; i < lights.Count; i++)
             {
-                Light light = lights[i];
-                if (light == null) continue;
-
-                float progress = (float)i / lights.Count;
-                EditorUtility.DisplayProgressBar("Generating Previews",
-                    $"Processing {light.name} ({i + 1}/{lights.Count})",
-                    progress);
-
-                CookieGeneratorSettings tempSettings = CreateInstance<CookieGeneratorSettings>();
-
-                // Copy all settings
-                tempSettings.baseName = settings.baseName;
-                tempSettings.resolution = settings.resolution;
-                tempSettings.useSpotlightRange = settings.useSpotlightRange;
-                tempSettings.shadowPlaneDistance = settings.shadowPlaneDistance;
-                tempSettings.shadowOpacity = settings.shadowOpacity;
-                tempSettings.cookieBrightness = settings.cookieBrightness;
-                tempSettings.shadowSampleRadius = settings.shadowSampleRadius;
-                tempSettings.shadowSamples = settings.shadowSamples;
-                tempSettings.blurMethod = settings.blurMethod;
-                tempSettings.blurRadius = settings.blurRadius;
-                tempSettings.blurIterations = settings.blurIterations;
-                tempSettings.rotationOffset = settings.rotationOffset;
-                tempSettings.orthographicSize = settings.orthographicSize;
-                tempSettings.savePath = settings.savePath;
-
-                // Set light-specific settings
-                tempSettings.cameraTransform = light.transform;
-                tempSettings.referenceLight = light;
-
-                // Create renderer with temp settings
-                CookieRenderer tempRenderer = new CookieRenderer(tempSettings);
-                Texture2D preview = tempRenderer.RenderCookie(256);
-                batchPreviewTextures[light] = preview;
-
+                LightCookieData componentData = light.GetComponent<LightCookieData>();
+                var tempSettings = componentData != null
+                    ? CookieGeneratorSettings.From(componentData, light)
+                    : CookieGeneratorSettings.From(settings, light);
+                var renderer = new CookieRenderer(tempSettings);
+                batchPreviewTextures[light] = renderer.RenderCookie(256);
+                renderer.Dispose();
                 DestroyImmediate(tempSettings);
             }
-        }
-        finally
-        {
-            EditorUtility.ClearProgressBar();
-        }
+        });
 
         Repaint();
     }
 
     private void GenerateAllCookies()
     {
-        mainWindow.GenerateAllCookies(settings, renderer, saver);
-    }
-
-    private void OnSceneGUI(SceneView sceneView)
-    {
-        gizmoDrawer.DrawSceneGizmos();
+        mainWindow.GenerateAllCookies();
     }
 }
