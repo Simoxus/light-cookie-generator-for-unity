@@ -1,10 +1,35 @@
 using UnityEngine;
-using UnityEditor;
-using System.Collections.Generic;
+using UnityEngine.Rendering.Universal;
 
 public class CookieRenderer
 {
     private CookieGeneratorSettings settings;
+    private Material _blackMaterial;
+
+    public void Dispose()
+    {
+        if (_blackMaterial != null)
+        {
+            Object.DestroyImmediate(_blackMaterial);
+            _blackMaterial = null;
+        }
+    }
+
+    private Material BlackMaterial
+    {
+        get
+        {
+            if (_blackMaterial == null)
+            {
+                string shaderName = GetBlackShaderName();
+                if (shaderName == null) return null;
+
+                _blackMaterial = new Material(Shader.Find(GetBlackShaderName()));
+                _blackMaterial.SetColor("_BaseColor", Color.black);
+            }
+            return _blackMaterial;
+        }
+    }
 
     public CookieRenderer(CookieGeneratorSettings settings)
     {
@@ -13,18 +38,11 @@ public class CookieRenderer
 
     public Texture2D RenderCookie(int renderResolution)
     {
-        Texture2D texture = RenderCookieWithShadows(renderResolution);
+        Texture2D texture = RenderOccluders(renderResolution);
 
-        // Apply blur/smoothing if needed
-        if (settings.blurMethod != CookieTextureSmoother.SmoothingMethod.None)
+        if (settings.blurMethod != CookieTextureProcessor.SmoothingMethod.None)
         {
-            Texture2D smoothed = CookieTextureSmoother.SmoothCookie(
-                texture,
-                settings.blurMethod,
-                settings.blurRadius,
-                settings.blurIterations
-            );
-
+            Texture2D smoothed = CookieTextureProcessor.SmoothCookie(texture, settings.blurMethod, settings.blurRadius, settings.blurIterations);
             Object.DestroyImmediate(texture);
             texture = smoothed;
         }
@@ -32,180 +50,221 @@ public class CookieRenderer
         return texture;
     }
 
-    private Texture2D RenderCookieWithShadows(int renderResolution)
+    public Texture2D RenderOccluders(int renderResolution)
     {
-        // Store original light state
-        Light lightToUse = settings.referenceLight;
-        bool hadCookie = false;
-        Texture originalCookie = null;
-        float originalIntensity = 1f;
-        LightShadows originalShadows = LightShadows.None;
-        bool originalLightEnabled = true;
+        var cameraObj = new GameObject("TempCookieCamera");
+        var camera = cameraObj.AddComponent<Camera>();
+        var cameraData = cameraObj.AddComponent<UniversalAdditionalCameraData>();
+        cameraData.renderPostProcessing = false;
+        camera.enabled = false;
 
-        if (lightToUse != null)
+        cameraObj.transform.position = settings.cameraTransform.position;
+        cameraObj.transform.rotation = settings.cameraTransform.rotation * Quaternion.Euler(settings.rotationOffset);
+
+        bool isSpot = settings.referenceLight != null && settings.referenceLight.type == LightType.Spot;
+
+        if (isSpot)
         {
-            hadCookie = lightToUse.cookie != null;
-            originalCookie = lightToUse.cookie;
-            originalIntensity = lightToUse.intensity;
-            originalShadows = lightToUse.shadows;
-            originalLightEnabled = lightToUse.enabled;
-
-            lightToUse.cookie = null;
-            lightToUse.shadows = LightShadows.Soft;
-            lightToUse.enabled = true;
+            camera.orthographic = false;
+            camera.fieldOfView = settings.referenceLight.spotAngle;
+            camera.nearClipPlane = settings.spotNearClip;
+            camera.farClipPlane = settings.spotFarClip;
+        }
+        else
+        {
+            camera.orthographic = true;
+            camera.orthographicSize = settings.orthographicSize;
+            camera.nearClipPlane = 0.01f;
+            camera.farClipPlane = settings.spotFarClip;
         }
 
-        GameObject tempCameraObj = new GameObject("TempCookieCamera");
-        Camera tempCamera = tempCameraObj.AddComponent<Camera>();
+        camera.clearFlags = CameraClearFlags.SolidColor;
+        camera.backgroundColor = Color.white;
+        camera.aspect = 1f;
+        camera.cullingMask = 1 << CookieGeneratorDefaults.OCCLUDER_LAYER;
 
-        tempCameraObj.transform.position = settings.cameraTransform.position;
-        tempCameraObj.transform.rotation = settings.cameraTransform.rotation * Quaternion.Euler(settings.rotationOffset);
+        float[] composite = BuildComposite(camera, renderResolution);
 
-        tempCamera.orthographic = true;
-        tempCamera.orthographicSize = settings.orthographicSize;
-        tempCamera.clearFlags = CameraClearFlags.SolidColor;
-        tempCamera.backgroundColor = Color.black;
-        tempCamera.nearClipPlane = 0.01f;
-        tempCamera.farClipPlane = 100f;
-        tempCamera.aspect = 1f;
-        tempCamera.cullingMask = ~0; // Render everything
+        Color[] result = new Color[composite.Length];
+        for (int i = 0; i < composite.Length; i++) // The composite starts fully white, and then each occluder acts a sort of layer, adding darkness to it
+            result[i] = new Color(composite[i], composite[i], composite[i], 1f);
 
-        // Calculate plane position
-        float planeDistance = settings.useSpotlightRange && lightToUse != null && lightToUse.type == LightType.Spot
-            ? lightToUse.range
-            : settings.shadowPlaneDistance;
-
-        Material planeMaterial;
-        GameObject planeObj = CreateShadowReceiver(tempCameraObj.transform, planeDistance, out planeMaterial);
-
-        // Configure shadow casting
-        var originalShadowModes = ConfigureSceneShadows(planeObj);
-
-        // Force lighting update
-        DynamicGI.UpdateEnvironment();
-
-        // Render
-        RenderTexture renderTexture = new RenderTexture(renderResolution, renderResolution, 24, RenderTextureFormat.ARGB32);
-        renderTexture.antiAliasing = 1;
-        tempCamera.targetTexture = renderTexture;
-        tempCamera.Render();
-
-        Texture2D texture = CaptureRenderTexture(renderTexture, renderResolution);
-        InvertAndApplyIntensity(texture);
-
-        RestoreShadowModes(originalShadowModes);
-
-        if (lightToUse != null)
-        {
-            lightToUse.cookie = originalCookie;
-            lightToUse.intensity = originalIntensity;
-            lightToUse.shadows = originalShadows;
-            lightToUse.enabled = originalLightEnabled;
-        }
-
-        RenderTexture.active = null;
-        renderTexture.Release();
-        Object.DestroyImmediate(tempCameraObj);
-        Object.DestroyImmediate(planeObj);
-        Object.DestroyImmediate(planeMaterial);
-
-        return texture;
-    }
-
-    private GameObject CreateShadowReceiver(Transform cameraTransform, float distance, out Material planeMaterial)
-    {
-        GameObject planeObj = GameObject.CreatePrimitive(PrimitiveType.Plane);
-        planeObj.name = "TempShadowPlane";
-
-        Vector3 forward = cameraTransform.forward;
-        planeObj.transform.position = cameraTransform.position + forward * distance;
-        planeObj.transform.rotation = cameraTransform.rotation;
-
-        float planeScale = settings.orthographicSize * 0.2f;
-        planeObj.transform.localScale = new Vector3(planeScale, 1f, planeScale);
-
-        MeshRenderer planeRenderer = planeObj.GetComponent<MeshRenderer>();
-
-        Material planeMat = new Material(Shader.Find("Unlit/Color"));
-        planeMat.color = Color.white;
-        planeRenderer.sharedMaterial = planeMat;
-        planeRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        planeRenderer.receiveShadows = true;
-
-        // Ensure the plane is rendered
-        planeRenderer.enabled = true;
-
-        planeMaterial = planeMat;
-        return planeObj;
-    }
-
-    private Dictionary<Renderer, UnityEngine.Rendering.ShadowCastingMode> ConfigureSceneShadows(GameObject planeObj)
-    {
-        Dictionary<Renderer, UnityEngine.Rendering.ShadowCastingMode> originalShadowModes =
-            new Dictionary<Renderer, UnityEngine.Rendering.ShadowCastingMode>();
-
-        MeshRenderer planeRenderer = planeObj.GetComponent<MeshRenderer>();
-        Renderer[] allRenderers = GameObject.FindObjectsByType<Renderer>(FindObjectsSortMode.None);
-
-        foreach (Renderer renderer in allRenderers)
-        {
-            if (renderer == planeRenderer) continue;
-
-            originalShadowModes[renderer] = renderer.shadowCastingMode;
-
-            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
-        }
-
-        return originalShadowModes;
-    }
-
-    private Texture2D CaptureRenderTexture(RenderTexture renderTexture, int resolution)
-    {
-        RenderTexture.active = renderTexture;
-        Texture2D texture = new Texture2D(resolution, resolution, TextureFormat.RGB24, false);
-        texture.ReadPixels(new Rect(0, 0, resolution, resolution), 0, 0);
+        var texture = new Texture2D(renderResolution, renderResolution, TextureFormat.RGB24, false);
+        texture.SetPixels(result);
         texture.Apply();
+
+        Object.DestroyImmediate(cameraObj);
+
+        ApplyIntensitySettings(texture);
         return texture;
     }
 
-    private void InvertAndApplyIntensity(Texture2D texture)
+    public Texture2D RenderSingleOccluder(MeshRenderer mr, Camera cam, int resolution)
     {
-        Color[] pixels = texture.GetPixels();
+        var blackMat = BlackMaterial;
+        var originalMats = mr.sharedMaterials;
+        var originalLayer = mr.gameObject.layer;
 
+        mr.gameObject.layer = CookieGeneratorDefaults.OCCLUDER_LAYER;
+        var blackMats = new Material[mr.sharedMaterials.Length];
+        for (int i = 0; i < blackMats.Length; i++) blackMats[i] = blackMat;
+        mr.sharedMaterials = blackMats;
+
+        var rt = new RenderTexture(resolution, resolution, 24, RenderTextureFormat.ARGB32);
+        cam.targetTexture = rt;
+        cam.Render();
+
+        RenderTexture.active = rt;
+        var tex = new Texture2D(resolution, resolution, TextureFormat.RGB24, false);
+        tex.ReadPixels(new Rect(0, 0, resolution, resolution), 0, 0);
+        tex.Apply();
+        RenderTexture.active = null;
+        cam.targetTexture = null;
+
+        mr.sharedMaterials = originalMats;
+        mr.gameObject.layer = originalLayer;
+
+        rt.Release();
+        Object.DestroyImmediate(rt);
+
+        return tex;
+    }
+
+    public Cubemap RenderPointCookie(int renderResolution)
+    {
+        var cubemap = new Cubemap(renderResolution, TextureFormat.RGB24, false);
+
+        (CubemapFace face, Quaternion rot)[] faces = {
+        (CubemapFace.PositiveX, Quaternion.LookRotation(Vector3.right,   Vector3.down)),
+        (CubemapFace.NegativeX, Quaternion.LookRotation(Vector3.left,    Vector3.down)),
+        (CubemapFace.PositiveY, Quaternion.LookRotation(Vector3.up,      Vector3.forward)),
+        (CubemapFace.NegativeY, Quaternion.LookRotation(Vector3.down,    Vector3.back)),
+        (CubemapFace.PositiveZ, Quaternion.LookRotation(Vector3.forward, Vector3.down)),
+        (CubemapFace.NegativeZ, Quaternion.LookRotation(Vector3.back,    Vector3.down)),
+    };
+
+        foreach (var (face, rot) in faces)
+        {
+            Texture2D faceTexture = RenderFace(rot, renderResolution);
+            cubemap.SetPixels(faceTexture.GetPixels(), face);
+            Object.DestroyImmediate(faceTexture);
+        }
+
+        cubemap.Apply();
+        return cubemap;
+    }
+
+    public Texture2D RenderFace(Quaternion rotation, int resolution)
+    {
+        var cameraObj = new GameObject("TempCookieCamera");
+        var camera = cameraObj.AddComponent<Camera>();
+        var cameraData = cameraObj.AddComponent<UniversalAdditionalCameraData>();
+        cameraData.renderPostProcessing = false;
+        camera.enabled = false;
+
+        camera.transform.position = settings.cameraTransform.position;
+        camera.transform.rotation = rotation;
+        camera.orthographic = false;
+        camera.fieldOfView = 90f;
+        camera.nearClipPlane = settings.spotNearClip;
+        camera.farClipPlane = settings.referenceLight != null ? settings.referenceLight.range : settings.spotFarClip;
+        camera.clearFlags = CameraClearFlags.SolidColor;
+        camera.backgroundColor = Color.white;
+        camera.aspect = 1f;
+        camera.cullingMask = 1 << CookieGeneratorDefaults.OCCLUDER_LAYER;
+
+        float[] composite = BuildComposite(camera, resolution);
+
+        Color[] result = new Color[composite.Length];
+        for (int i = 0; i < composite.Length; i++)
+            result[i] = new Color(composite[i], composite[i], composite[i], 1f);
+
+        var texture = new Texture2D(resolution, resolution, TextureFormat.RGB24, false);
+        texture.SetPixels(result);
+        texture.Apply();
+
+        Object.DestroyImmediate(cameraObj);
+        ApplyIntensitySettings(texture);
+        return texture;
+    }
+
+    private float[] BuildComposite(Camera cam, int resolution)
+    {
+        float[] composite = new float[resolution * resolution];
+        for (int i = 0; i < composite.Length; i++) composite[i] = 1f;
+
+        foreach (var entry in settings.occluders)
+        {
+            if (entry == null || entry.renderer == null || !entry.enabled) continue;
+
+            Texture2D mask = RenderSingleOccluder(entry.renderer, cam, resolution);
+
+            if (entry.dilateRadius > 0)
+            {
+                Texture2D dilated = CookieTextureProcessor.Dilate(mask, entry.dilateRadius);
+                Object.DestroyImmediate(mask);
+                mask = dilated;
+            }
+
+            if (entry.erodeRadius > 0)
+            {
+                Texture2D eroded = CookieTextureProcessor.Erode(mask, entry.erodeRadius);
+                Object.DestroyImmediate(mask);
+                mask = eroded;
+            }
+
+            Color[] pixels = mask.GetPixels();
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                float value = pixels[i].grayscale;
+                if (entry.invert) value = 1f - value;
+                float occluded = Mathf.Min(composite[i], value);
+                composite[i] = Mathf.Lerp(composite[i], occluded, entry.opacity);
+            }
+
+            Object.DestroyImmediate(mask);
+        }
+
+        return composite;
+    }
+
+    private void ApplyIntensitySettings(Texture2D texture)
+    {
+        if (settings.shadowOpacity >= 1f && settings.cookieBrightness <= 0f) return;
+
+        Color[] pixels = texture.GetPixels();
         for (int i = 0; i < pixels.Length; i++)
         {
-            float luminance = pixels[i].grayscale;
+            float lum = pixels[i].grayscale;
 
             if (settings.shadowOpacity < 1f)
             {
-                // Identify shadow regions (darker areas)
-                float shadowMask = 1f - luminance;
-
-                float opacityAdjustment = shadowMask * (1f - settings.shadowOpacity);
-                luminance = Mathf.Lerp(luminance, 1f, opacityAdjustment);
+                float shadowMask = 1f - lum;
+                lum = Mathf.Lerp(lum, 1f, shadowMask * (1f - settings.shadowOpacity));
             }
 
-            // Entire image brightness
             if (settings.cookieBrightness > 0f)
             {
-                luminance = Mathf.Lerp(luminance, 1f, settings.cookieBrightness);
+                lum = Mathf.Lerp(lum, 1f, settings.cookieBrightness);
             }
 
-            pixels[i] = new Color(luminance, luminance, luminance, 1f);
+            pixels[i] = new Color(lum, lum, lum, 1f);
         }
-
         texture.SetPixels(pixels);
         texture.Apply();
     }
 
-    private void RestoreShadowModes(Dictionary<Renderer, UnityEngine.Rendering.ShadowCastingMode> originalShadowModes)
+    private static string GetBlackShaderName()
     {
-        foreach (var kvp in originalShadowModes)
+        if (CookieGenerator.RenderPipelineInfo.IsUniversalRenderPipeline())
         {
-            if (kvp.Key != null)
-            {
-                kvp.Key.shadowCastingMode = kvp.Value;
-            }
+            return "Universal Render Pipeline/Unlit";
         }
+        if (CookieGenerator.RenderPipelineInfo.IsHighDefinitionRenderPipeline())
+        {
+            return "HDRP/Unlit";
+        }
+
+        return null;
     }
 }
