@@ -4,6 +4,26 @@ using UnityEngine;
 
 public class CookieGenerator : EditorWindow
 {
+    public static class RenderPipelineInfo
+    {
+        public static RenderPipelineAsset renderPipelineAsset = GraphicsSettings.defaultRenderPipeline;
+
+        public static bool IsSupportedPipeline()
+        {
+            return IsUniversalRenderPipeline() || IsHighDefinitionRenderPipeline();
+        }
+
+        public static bool IsUniversalRenderPipeline()
+        {
+            return renderPipelineAsset is UniversalRenderPipelineAsset urpAsset;
+        }
+
+        public static bool IsHighDefinitionRenderPipeline()
+        {
+            string typeName = renderPipelineAsset?.GetType().FullName;
+            return typeName != null && typeName.Contains("HDRenderPipelineAsset"); // Might br considered a little hacky but it works
+        }
+    }
     private CookieGeneratorSettings settings;
     private SerializedObject serializedSettings;
     private CookieGeneratorWindow mainWindow;
