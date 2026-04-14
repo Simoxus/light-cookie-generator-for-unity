@@ -66,6 +66,10 @@ public class CookieRenderer
             var cameraData = cameraObj.AddComponent<UniversalAdditionalCameraData>();
             cameraData.renderPostProcessing = false;
         }
+        else if (CookieGenerator.RenderPipelineInfo.IsHighDefinitionRenderPipeline())
+        {
+            CookieGenerator.RenderPipelineInfo.AddHDCameraData(cameraObj);
+        }
         camera.enabled = false;
 
         cameraObj.transform.position = settings.cameraTransform.position;
@@ -172,6 +176,10 @@ public class CookieRenderer
         {
             var cameraData = cameraObj.AddComponent<UniversalAdditionalCameraData>();
             cameraData.renderPostProcessing = false;
+        }
+        else if (CookieGenerator.RenderPipelineInfo.IsHighDefinitionRenderPipeline())
+        {
+            CookieGenerator.RenderPipelineInfo.AddHDCameraData(cameraObj);
         }
         camera.enabled = false;
 

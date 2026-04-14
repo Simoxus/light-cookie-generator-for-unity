@@ -31,6 +31,22 @@ public class CookieGenerator : EditorWindow
             string typeName = renderPipelineAsset?.GetType().FullName;
             return typeName != null && typeName.Contains("HDRenderPipelineAsset"); // Might br considered a little hacky but it works
         }
+
+        public static Component AddHDCameraData(GameObject target)
+        {
+            var type = Type.GetType(
+                "UnityEngine.Rendering.HighDefinition.HDAdditionalCameraData, " +
+                "Unity.RenderPipelines.HighDefinition.Runtime");
+            if (type == null) return null;
+
+            var component = target.AddComponent(type);
+
+            // Disable post-processing (probably??? i have no idea)
+            var prop = type.GetProperty("renderPostProcessing");
+            prop?.SetValue(component, false);
+
+            return component;
+        }
     }
 
     public static bool IsValidLightType(Light light)
