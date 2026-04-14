@@ -25,7 +25,14 @@ public class CookieRenderer
                 if (shaderName == null) return null;
 
                 _blackMaterial = new Material(Shader.Find(GetBlackShaderName()));
-                _blackMaterial.SetColor("_BaseColor", Color.black);
+                if (CookieGenerator.RenderPipelineInfo.IsBuiltInRenderPipeline())
+                {
+                    _blackMaterial.SetColor("_Color", Color.black);
+                }
+                else
+                {
+                    _blackMaterial.SetColor("_BaseColor", Color.black);
+                }
             }
             return _blackMaterial;
         }
@@ -54,8 +61,11 @@ public class CookieRenderer
     {
         var cameraObj = new GameObject("TempCookieCamera");
         var camera = cameraObj.AddComponent<Camera>();
-        var cameraData = cameraObj.AddComponent<UniversalAdditionalCameraData>();
-        cameraData.renderPostProcessing = false;
+        if (CookieGenerator.RenderPipelineInfo.IsUniversalRenderPipeline())
+        {
+            var cameraData = cameraObj.AddComponent<UniversalAdditionalCameraData>();
+            cameraData.renderPostProcessing = false;
+        }
         camera.enabled = false;
 
         cameraObj.transform.position = settings.cameraTransform.position;
@@ -158,8 +168,11 @@ public class CookieRenderer
     {
         var cameraObj = new GameObject("TempCookieCamera");
         var camera = cameraObj.AddComponent<Camera>();
-        var cameraData = cameraObj.AddComponent<UniversalAdditionalCameraData>();
-        cameraData.renderPostProcessing = false;
+        if (CookieGenerator.RenderPipelineInfo.IsUniversalRenderPipeline())
+        {
+            var cameraData = cameraObj.AddComponent<UniversalAdditionalCameraData>();
+            cameraData.renderPostProcessing = false;
+        }
         camera.enabled = false;
 
         camera.transform.position = settings.cameraTransform.position;
@@ -256,6 +269,10 @@ public class CookieRenderer
 
     private static string GetBlackShaderName()
     {
+        if (CookieGenerator.RenderPipelineInfo.IsBuiltInRenderPipeline())
+        {
+            return "Unlit/Color";
+        }
         if (CookieGenerator.RenderPipelineInfo.IsUniversalRenderPipeline())
         {
             return "Universal Render Pipeline/Unlit";

@@ -55,7 +55,7 @@ public class CookieGeneratorWindow
     {
         if (!CookieGenerator.RenderPipelineInfo.IsSupportedPipeline())
         {
-            EditorGUILayout.HelpBox("Cookie baking only supports URP and HDRP. :(", MessageType.Error);
+            EditorGUILayout.HelpBox("Cookie baking is not supported for this pipeline.", MessageType.Error);
             return true;
         }
         return false;

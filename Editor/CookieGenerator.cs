@@ -13,7 +13,12 @@ public class CookieGenerator : EditorWindow
 
         public static bool IsSupportedPipeline()
         {
-            return IsUniversalRenderPipeline() || IsHighDefinitionRenderPipeline();
+            return IsBuiltInRenderPipeline(); || IsUniversalRenderPipeline() || IsHighDefinitionRenderPipeline()
+        }
+
+        public static bool IsBuiltInRenderPipeline()
+        {
+            return renderPipelineAsset == null;
         }
 
         public static bool IsUniversalRenderPipeline()
