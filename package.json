@@ -2,7 +2,7 @@
   "name": "com.simoxus.light-cookie-generator",
   "displayName": "Light Cookie Generator",
   "description": "Unity editor tool that lets you generate light cookies and simulate shadows... fresh out of the oven (i'm sorry)",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": 
   {
     "name": "Simoxus", 
