@@ -1,11 +1,52 @@
 ﻿using System.Collections.Generic;
 using UnityEditor;
+using UnityEditorInternal;
 using UnityEngine;
 
 [CustomEditor(typeof(LightCookieData))]
 [CanEditMultipleObjects]
 public class LightCookieDataEditor : Editor
 {
+    private ReorderableList _occludersList;
+
+    private void OnEnable()
+    {
+        var occludersProp = serializedObject.FindProperty("occluders");
+
+        _occludersList = new ReorderableList(serializedObject, occludersProp, true, true, true, true);
+
+        _occludersList.drawHeaderCallback = rect =>
+            EditorGUI.LabelField(rect, "Occluders");
+
+        _occludersList.drawElementCallback = (rect, index, isActive, isFocused) =>
+        {
+            var element = occludersProp.GetArrayElementAtIndex(index);
+            EditorGUI.PropertyField(rect, element, true);
+        };
+
+        _occludersList.elementHeightCallback = index =>
+        {
+            var element = occludersProp.GetArrayElementAtIndex(index);
+            return EditorGUI.GetPropertyHeight(element, true) + 2f;
+        };
+
+        _occludersList.onAddCallback = list =>
+        {
+            int newIndex = occludersProp.arraySize;
+            occludersProp.arraySize++;
+            var element = occludersProp.GetArrayElementAtIndex(newIndex);
+
+            element.FindPropertyRelative("enabled").boolValue = true;
+            element.FindPropertyRelative("renderer").objectReferenceValue = null;
+            element.FindPropertyRelative("opacity").floatValue = 1f;
+            element.FindPropertyRelative("invert").boolValue = false;
+            element.FindPropertyRelative("dilateRadius").intValue = 0;
+            element.FindPropertyRelative("erodeRadius").intValue = 0;
+
+            serializedObject.ApplyModifiedProperties();
+        };
+    }
+
     public override void OnInspectorGUI()
     {
         if (target == null) return;
@@ -21,7 +62,7 @@ public class LightCookieDataEditor : Editor
         var data = (LightCookieData)target;
         var light = data.GetComponent<Light>();
 
-        EditorGUILayout.PropertyField(serializedObject.FindProperty("occluders"), true);
+        _occludersList.DoLayoutList();
 
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
