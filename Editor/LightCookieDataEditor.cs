@@ -13,37 +13,38 @@ public class LightCookieDataEditor : Editor
     {
         var occludersProp = serializedObject.FindProperty("occluders");
 
-        _occludersList = new ReorderableList(serializedObject, occludersProp, true, true, true, true);
-
-        _occludersList.drawHeaderCallback = rect =>
-            EditorGUI.LabelField(rect, "Occluders");
-
-        _occludersList.drawElementCallback = (rect, index, isActive, isFocused) =>
+        _occludersList = new ReorderableList(serializedObject, occludersProp, true, true, true, true)
         {
-            var element = occludersProp.GetArrayElementAtIndex(index);
-            EditorGUI.PropertyField(rect, element, true);
-        };
+            drawHeaderCallback = rect =>
+                EditorGUI.LabelField(rect, "Occluders"),
 
-        _occludersList.elementHeightCallback = index =>
-        {
-            var element = occludersProp.GetArrayElementAtIndex(index);
-            return EditorGUI.GetPropertyHeight(element, true) + 2f;
-        };
+            drawElementCallback = (rect, index, isActive, isFocused) =>
+                {
+                    var element = occludersProp.GetArrayElementAtIndex(index);
+                    EditorGUI.PropertyField(rect, element, true);
+                },
 
-        _occludersList.onAddCallback = list =>
-        {
-            int newIndex = occludersProp.arraySize;
-            occludersProp.arraySize++;
-            var element = occludersProp.GetArrayElementAtIndex(newIndex);
+            elementHeightCallback = index =>
+                {
+                    var element = occludersProp.GetArrayElementAtIndex(index);
+                    return EditorGUI.GetPropertyHeight(element, true) + 2f;
+                },
 
-            element.FindPropertyRelative("enabled").boolValue = true;
-            element.FindPropertyRelative("renderer").objectReferenceValue = null;
-            element.FindPropertyRelative("opacity").floatValue = 1f;
-            element.FindPropertyRelative("invert").boolValue = false;
-            element.FindPropertyRelative("dilateRadius").intValue = 0;
-            element.FindPropertyRelative("erodeRadius").intValue = 0;
+            onAddCallback = list =>
+                {
+                    int newIndex = occludersProp.arraySize;
+                    occludersProp.arraySize++;
+                    var element = occludersProp.GetArrayElementAtIndex(newIndex);
 
-            serializedObject.ApplyModifiedProperties();
+                    element.FindPropertyRelative("enabled").boolValue = true;
+                    element.FindPropertyRelative("renderer").objectReferenceValue = null;
+                    element.FindPropertyRelative("opacity").floatValue = 1f;
+                    element.FindPropertyRelative("invert").boolValue = false;
+                    element.FindPropertyRelative("dilateRadius").intValue = 0;
+                    element.FindPropertyRelative("erodeRadius").intValue = 0;
+
+                    serializedObject.ApplyModifiedProperties();
+                }
         };
     }
 
