@@ -24,8 +24,6 @@ A Unity Editor tool that lets you generate light cookies and simulate shadows...
 
 ---
 
-## Frequently Asked Questions
-
 * #### **What does this tool actually do?**
 Basically, it creates a temporary camera at the light's position, rendering each occluder individually. It then composites the layers together by taking the minimum value across all different layers. After this is done and IF a type of blur was selected, it runs a blur pass over the result. The final texture gets saved, and assigned back to the light. Because each occluder renders separately before compositing, individual controls are also available! The actual concept; rendering each mesh as flat black geometry and then compositing the results, was so much easier than I would've expected.
 
