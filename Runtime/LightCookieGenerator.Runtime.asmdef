@@ -1,9 +1,7 @@
 {
     "name": "LightCookieGenerator.Runtime",
     "rootNamespace": "",
-    "references": [
-        "GUID:1e8db3436a3f6d544a17cbcd852c3ac8"
-    ],
+    "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
