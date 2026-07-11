@@ -3,7 +3,7 @@ using UnityEngine.Rendering.Universal;
 
 public class CookieRenderer
 {
-    private CookieGeneratorSettings settings;
+    private CookieGeneratorSettings _settings;
     private Material _blackMaterial;
 
     public void Dispose()
@@ -21,10 +21,10 @@ public class CookieRenderer
         {
             if (_blackMaterial == null)
             {
-                string shaderName = GetBlackShaderName();
+                string shaderName = CookieGenerator.RenderPipelineInfo.GetBlackShaderName();
                 if (shaderName == null) return null;
 
-                _blackMaterial = new Material(Shader.Find(GetBlackShaderName()));
+                _blackMaterial = new Material(Shader.Find(CookieGenerator.RenderPipelineInfo.GetBlackShaderName()));
                 if (CookieGenerator.RenderPipelineInfo.IsBuiltInRenderPipeline())
                 {
                     _blackMaterial.SetColor("_Color", Color.black);
@@ -38,18 +38,18 @@ public class CookieRenderer
         }
     }
 
-    public CookieRenderer(CookieGeneratorSettings settings)
+    public CookieRenderer(CookieGeneratorSettings _settings)
     {
-        this.settings = settings;
+        this._settings = _settings;
     }
 
     public Texture2D RenderCookie(int renderResolution)
     {
         Texture2D texture = RenderOccluders(renderResolution);
 
-        if (settings.blurMethod != CookieTextureProcessor.SmoothingMethod.None)
+        if (_settings.blurMethod != CookieTextureProcessor.SmoothingMethod.None)
         {
-            Texture2D smoothed = CookieTextureProcessor.SmoothCookie(texture, settings.blurMethod, settings.blurRadius, settings.blurIterations);
+            Texture2D smoothed = CookieTextureProcessor.SmoothCookie(texture, _settings.blurMethod, _settings.blurRadius, _settings.blurIterations);
             Object.DestroyImmediate(texture);
             texture = smoothed;
         }
@@ -72,24 +72,24 @@ public class CookieRenderer
         }
         camera.enabled = false;
 
-        cameraObj.transform.position = settings.cameraTransform.position;
-        cameraObj.transform.rotation = settings.cameraTransform.rotation * Quaternion.Euler(settings.rotationOffset);
+        cameraObj.transform.position = _settings.cameraTransform.position;
+        cameraObj.transform.rotation = _settings.cameraTransform.rotation * Quaternion.Euler(_settings.rotationOffset);
 
-        bool isSpot = settings.referenceLight != null && settings.referenceLight.type == LightType.Spot;
+        bool isSpot = _settings.referenceLight != null && _settings.referenceLight.type == LightType.Spot;
 
         if (isSpot)
         {
             camera.orthographic = false;
-            camera.fieldOfView = settings.referenceLight.spotAngle;
-            camera.nearClipPlane = settings.spotNearClip;
-            camera.farClipPlane = settings.spotFarClip;
+            camera.fieldOfView = _settings.referenceLight.spotAngle;
+            camera.nearClipPlane = _settings.spotNearClip;
+            camera.farClipPlane = _settings.spotFarClip;
         }
         else
         {
             camera.orthographic = true;
-            camera.orthographicSize = settings.orthographicSize;
+            camera.orthographicSize = _settings.orthographicSize;
             camera.nearClipPlane = 0.01f;
-            camera.farClipPlane = settings.spotFarClip;
+            camera.farClipPlane = _settings.spotFarClip;
         }
 
         camera.clearFlags = CameraClearFlags.SolidColor;
@@ -183,12 +183,12 @@ public class CookieRenderer
         }
         camera.enabled = false;
 
-        camera.transform.position = settings.cameraTransform.position;
+        camera.transform.position = _settings.cameraTransform.position;
         camera.transform.rotation = rotation;
         camera.orthographic = false;
         camera.fieldOfView = 90f;
-        camera.nearClipPlane = settings.spotNearClip;
-        camera.farClipPlane = settings.referenceLight != null ? settings.referenceLight.range : settings.spotFarClip;
+        camera.nearClipPlane = _settings.spotNearClip;
+        camera.farClipPlane = _settings.referenceLight != null ? _settings.referenceLight.range : _settings.spotFarClip;
         camera.clearFlags = CameraClearFlags.SolidColor;
         camera.backgroundColor = Color.white;
         camera.aspect = 1f;
@@ -214,7 +214,7 @@ public class CookieRenderer
         float[] composite = new float[resolution * resolution];
         for (int i = 0; i < composite.Length; i++) composite[i] = 1f;
 
-        foreach (var entry in settings.occluders)
+        foreach (var entry in _settings.occluders)
         {
             if (entry == null || entry.renderer == null || !entry.enabled) continue;
 
@@ -251,45 +251,27 @@ public class CookieRenderer
 
     private void ApplyIntensitySettings(Texture2D texture)
     {
-        if (settings.shadowOpacity >= 1f && settings.cookieBrightness <= 0f) return;
+        if (_settings.shadowOpacity >= 1f && _settings.cookieBrightness <= 0f) return;
 
         Color[] pixels = texture.GetPixels();
         for (int i = 0; i < pixels.Length; i++)
         {
             float lum = pixels[i].grayscale;
 
-            if (settings.shadowOpacity < 1f)
+            if (_settings.shadowOpacity < 1f)
             {
                 float shadowMask = 1f - lum;
-                lum = Mathf.Lerp(lum, 1f, shadowMask * (1f - settings.shadowOpacity));
+                lum = Mathf.Lerp(lum, 1f, shadowMask * (1f - _settings.shadowOpacity));
             }
 
-            if (settings.cookieBrightness > 0f)
+            if (_settings.cookieBrightness > 0f)
             {
-                lum = Mathf.Lerp(lum, 1f, settings.cookieBrightness);
+                lum = Mathf.Lerp(lum, 1f, _settings.cookieBrightness);
             }
 
             pixels[i] = new Color(lum, lum, lum, 1f);
         }
         texture.SetPixels(pixels);
         texture.Apply();
-    }
-
-    private static string GetBlackShaderName()
-    {
-        if (CookieGenerator.RenderPipelineInfo.IsBuiltInRenderPipeline())
-        {
-            return "Unlit/Color";
-        }
-        if (CookieGenerator.RenderPipelineInfo.IsUniversalRenderPipeline())
-        {
-            return "Universal Render Pipeline/Unlit";
-        }
-        if (CookieGenerator.RenderPipelineInfo.IsHighDefinitionRenderPipeline())
-        {
-            return "HDRP/Unlit";
-        }
-
-        return null;
     }
 }

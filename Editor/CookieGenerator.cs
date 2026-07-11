@@ -32,6 +32,24 @@ public static class CookieGenerator
             return typeName != null && typeName.Contains("HDRenderPipelineAsset");
         }
 
+        public static string GetBlackShaderName()
+        {
+            if (CookieGenerator.RenderPipelineInfo.IsBuiltInRenderPipeline())
+            {
+                return "Unlit/Color";
+            }
+            if (CookieGenerator.RenderPipelineInfo.IsUniversalRenderPipeline())
+            {
+                return "Universal Render Pipeline/Unlit";
+            }
+            if (CookieGenerator.RenderPipelineInfo.IsHighDefinitionRenderPipeline())
+            {
+                return "HDRP/Unlit";
+            }
+
+            return null;
+        }
+
         public static Component AddHDCameraData(GameObject target)
         {
             var type = Type.GetType(
