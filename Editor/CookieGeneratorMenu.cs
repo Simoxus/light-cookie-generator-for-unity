@@ -41,7 +41,7 @@ public static class CookieGeneratorMenu
     private static void ExecuteBake()
     {
         EditorApplication.delayCall -= ExecuteBake;
-        var usedNames = new HashSet<string>();
+        var usedNames = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
         var targetList = new List<LightCookieData>();
         foreach (GameObject selected in Selection.gameObjects)
         {
@@ -65,12 +65,10 @@ public static class CookieGeneratorMenu
             {
                 Light light = data.GetComponent<Light>();
                 if (light == null) return;
-                string baseName = $"Cookie_{data.ResolveBaseName()}_{light.type}";
-                string safeName = CookieGenerator.ResolveSafeName(baseName, data.savePath, data.lastBakedName, usedNames);
-                usedNames.Add(safeName);
+                string safeName = CookieGenerator.ResolveSafeName(data, light, usedNames);
                 Undo.RecordObject(light, "Bake Light Cookie");
                 Undo.RecordObject(data, "Bake Light Cookie");
-                bool saved = CookieTextureSaver.GenerateCookieForLight(light, data, data.savePath, safeName, true);
+                bool saved = CookieTextureSaver.GenerateCookieForLight(light, data, safeName, true);
                 if (!saved) return;
                 data.lastBakedName = safeName;
                 EditorUtility.SetDirty(data);

@@ -12,7 +12,6 @@ public class LightCookieData : MonoBehaviour
     public bool automaticNaming = CookieGeneratorDefaults.AUTOMATIC_NAMING;
     public bool useParentName = CookieGeneratorDefaults.USE_PARENT_NAME;
     public int parentLevel = CookieGeneratorDefaults.PARENT_LEVEL;
-    public bool putCookiesInParentFolder = CookieGeneratorDefaults.PUT_COOKIES_IN_PARENT_FOLDER;
     public string nameSuffix = CookieGeneratorDefaults.NAME_SUFFIX;
 
     // Render
@@ -35,15 +34,20 @@ public class LightCookieData : MonoBehaviour
     public string baseName = CookieGeneratorDefaults.BASE_NAME;
     public int resolution = CookieGeneratorDefaults.RESOLUTION;
 
+    // The saved cookie assets, used to tell this component's own files apart from other lights'
     [HideInInspector] public Texture2D lastBakedCookie;
     [HideInInspector] public Cubemap lastBakedPointCookie;
     [HideInInspector] public string lastBakedName = "";
     [HideInInspector] public string componentGuid = "";
 
 #if UNITY_EDITOR
+    // Set by the editor assembly, so new components pick up the output defaults from Project Settings
+    public static System.Action<LightCookieData> applyProjectDefaults;
+
     private void Reset()
     {
         RegenerateGuid();
+        applyProjectDefaults?.Invoke(this);
 
         Light light = GetComponent<Light>();
         if (light == null) return;
@@ -83,6 +87,7 @@ public class LightCookieData : MonoBehaviour
         componentGuid = System.Guid.NewGuid().ToString();
         lastBakedName = "";
         lastBakedCookie = null;
+        lastBakedPointCookie = null;
         UnityEditor.EditorUtility.SetDirty(this);
     }
 #endif

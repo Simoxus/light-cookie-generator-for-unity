@@ -78,7 +78,6 @@ public class LightCookieDataEditor : Editor
             if (data.useParentName)
             {
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("parentLevel"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("putCookiesInParentFolder"));
             }
         }
         else
@@ -105,7 +104,7 @@ public class LightCookieDataEditor : Editor
 
         GUILayout.Label("Blur", EditorStyles.boldLabel);
         EditorGUILayout.PropertyField(serializedObject.FindProperty("blurMethod"));
-        if (CookieGeneratorDefaults.SHOW_STUPID_STUFF)
+        if (LightCookieGeneratorProjectSettings.instance.showStupidStuff)
         {
             var currentMethod = (CookieTextureProcessor.SmoothingMethod)serializedObject.FindProperty("blurMethod").enumValueIndex;
             string blurDesc = currentMethod switch
@@ -171,7 +170,7 @@ public class LightCookieDataEditor : Editor
 
         if (GUILayout.Button(label))
         {
-            var usedNames = new HashSet<string>();
+            var usedNames = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
             var targetList = new List<LightCookieData>();
             foreach (var t in targets) targetList.Add((LightCookieData)t);
 
@@ -179,9 +178,7 @@ public class LightCookieDataEditor : Editor
             {
                 var targetLight = lightCookieData.GetComponent<Light>();
                 if (targetLight == null) return;
-                string baseName = $"Cookie_{lightCookieData.ResolveBaseName()}_{targetLight.type}";
-                string safeName = CookieGenerator.ResolveSafeName(baseName, lightCookieData.savePath, lightCookieData.lastBakedName, usedNames);
-                usedNames.Add(safeName);
+                string safeName = CookieGenerator.ResolveSafeName(lightCookieData, targetLight, usedNames);
                 BakeCookie(lightCookieData, targetLight, safeName);
             });
         }
@@ -197,16 +194,8 @@ public class LightCookieDataEditor : Editor
         Undo.RecordObject(light, "Bake Light Cookie");
         Undo.RecordObject(data, "Bake Light Cookie");
 
-        bool saved = CookieTextureSaver.GenerateCookieForLight(light, data, data.savePath, safeName, true);
+        bool saved = CookieTextureSaver.GenerateCookieForLight(light, data, safeName, true);
         if (!saved) return;
-
-        var previewSettings = CookieGeneratorSettings.From(data, light);
-        var renderer = new CookieRenderer(previewSettings);
-        data.lastBakedCookie = light.type == LightType.Point
-            ? renderer.RenderFace(Quaternion.LookRotation(Vector3.forward, Vector3.down), 128)
-            : renderer.RenderCookie(128);
-        renderer.Dispose();
-        DestroyImmediate(previewSettings);
 
         data.lastBakedName = safeName;
         EditorUtility.SetDirty(data);

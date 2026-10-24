@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -72,30 +73,51 @@ public static class CookieGenerator
         return light.type == LightType.Spot || light.type == LightType.Directional || light.type == LightType.Point;
     }
 
-    public static string ResolveSafeName(string baseName, string savePath, string ownedName, HashSet<string> usedThisBatch)
+    // Picks a file name in the folder the cookie actually gets saved to, so baking never replaces another light's cookie.
+    // usedThisBatch holds full asset paths, and the chosen path is added to it.
+    public static string ResolveSafeName(LightCookieData data, Light light, HashSet<string> usedThisBatch)
     {
-        if (!string.IsNullOrEmpty(ownedName) && !usedThisBatch.Contains(ownedName))
+        string baseName = $"Cookie_{data.ResolveBaseName()}_{light.type}";
+        string folder = CookieTextureSaver.ResolveSaveFolder(data, light);
+        string extension = CookieTextureSaver.GetExtension(light);
+        string PathOf(string name) => $"{folder}/{name}.{extension}";
+
+        string ownedName = data.lastBakedName;
+        if (!string.IsNullOrEmpty(ownedName) && !usedThisBatch.Contains(PathOf(ownedName)))
         {
-            // Only reuse the owned name if the field actually exists
-            if (AssetDatabase.LoadAssetAtPath<Texture2D>($"{savePath}/{ownedName}.png") != null)
+            UnityEngine.Object owned = light.type == LightType.Point ? data.lastBakedPointCookie : data.lastBakedCookie;
+            if (IsOwnedCookie(PathOf(ownedName), owned))
             {
+                usedThisBatch.Add(PathOf(ownedName));
                 return ownedName;
             }
         }
 
         string candidate = baseName;
         int counter = 1;
-        while (usedThisBatch.Contains(candidate) || AssetDatabase.LoadAssetAtPath<Texture2D>($"{savePath}/{candidate}.png") != null)
+        while (usedThisBatch.Contains(PathOf(candidate)) || File.Exists(PathOf(candidate)))
         {
             candidate = $"{baseName} ({counter++})";
         }
 
+        usedThisBatch.Add(PathOf(candidate));
         return candidate;
+    }
+
+    private static bool IsOwnedCookie(string path, UnityEngine.Object owned)
+    {
+        UnityEngine.Object existing = AssetDatabase.LoadMainAssetAtPath(path);
+        if (existing == null) return false;
+
+        // Cookies baked before the asset was tracked only have their name to go on
+        if (owned == null || !EditorUtility.IsPersistent(owned)) return true;
+
+        return existing == owned;
     }
 
     public static void RunWithProgress<T>(string title, string info, string funnyInfo, List<T> items, Action<T, int> process)
     {
-        static string Msg(string normal, string funny) => CookieGeneratorDefaults.SHOW_STUPID_STUFF ? funny : normal;
+        static string Msg(string normal, string funny) => LightCookieGeneratorProjectSettings.instance.showStupidStuff ? funny : normal;
 
         EditorUtility.DisplayProgressBar(title, Msg(info, funnyInfo), 0f);
         try

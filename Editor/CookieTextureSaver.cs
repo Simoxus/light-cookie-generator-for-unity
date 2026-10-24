@@ -111,18 +111,11 @@ public class CookieTextureSaver
     // Used by the light cookie data editor
     public static bool GenerateCookieForLight(
         Light light, LightCookieData data,
-        string savePath, string baseName, bool autoAssign)
+        string baseName, bool autoAssign)
     {
         if (light == null || data == null) return false;
 
-        if (data.automaticNaming && data.useParentName)
-        {
-            string parentName = ResolveParentName(light.transform, data.parentLevel);
-            if (!string.IsNullOrEmpty(parentName))
-            {
-                savePath = $"{savePath}/{parentName}";
-            }
-        }
+        string savePath = ResolveSaveFolder(data, light);
 
         var tempSettings = CookieGeneratorSettings.From(data, light);
         tempSettings.baseName = baseName;
@@ -133,8 +126,33 @@ public class CookieTextureSaver
             return BakeAndSavePoint(light, data, tempSettings, savePath, baseName, autoAssign);
         }
 
-        return BakeAndSave(light, tempSettings, savePath, baseName, autoAssign);
+        bool saved = BakeAndSave(light, tempSettings, savePath, baseName, autoAssign);
+        if (saved)
+        {
+            Undo.RecordObject(data, "Bake Light Cookie");
+            data.lastBakedCookie = AssetDatabase.LoadAssetAtPath<Texture2D>($"{savePath}/{baseName}.png");
+            EditorUtility.SetDirty(data);
+        }
+
+        return saved;
     }
+
+    // The folder a light's cookie is saved to
+    public static string ResolveSaveFolder(LightCookieData data, Light light)
+    {
+        if (data.automaticNaming && data.useParentName)
+        {
+            string parentName = ResolveParentName(light.transform, data.parentLevel);
+            if (!string.IsNullOrEmpty(parentName))
+            {
+                return $"{data.savePath}/{parentName}";
+            }
+        }
+
+        return data.savePath;
+    }
+
+    public static string GetExtension(Light light) => light.type == LightType.Point ? "cubemap" : "png";
 
     private static bool BakeAndSave(
         Light light, CookieGeneratorSettings tempSettings,

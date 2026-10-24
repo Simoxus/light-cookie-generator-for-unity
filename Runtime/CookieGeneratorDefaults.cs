@@ -2,14 +2,12 @@
 
 public static class CookieGeneratorDefaults
 {
-    // Editor
     public const bool SHOW_STUPID_STUFF = true; // don't do it :(
 
     // Naming
     public const bool AUTOMATIC_NAMING = true;
     public const bool USE_PARENT_NAME = true;
     public const int PARENT_LEVEL = 3;
-    public const bool PUT_COOKIES_IN_PARENT_FOLDER = true;
     public const string NAME_SUFFIX = "";
 
     // Render
